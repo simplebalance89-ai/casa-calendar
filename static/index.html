@@ -231,9 +231,69 @@ body {
 }
 .cal-filter.active { border-color: rgba(212,160,23,0.3); color: var(--gold); background: rgba(212,160,23,0.08); }
 
+/* Weather bar */
+.weather-bar {
+    display: flex; gap: 4px; padding: 8px 12px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+.weather-bar::-webkit-scrollbar { display: none; }
+.weather-day {
+    flex: 1; min-width: 72px; text-align: center;
+    padding: 8px 6px; border-radius: 10px;
+    background: rgba(255,255,255,0.025); border: 1px solid var(--border);
+    transition: all 0.2s;
+}
+.weather-day:first-child { border-color: rgba(212,160,23,0.2); background: rgba(212,160,23,0.05); }
+.weather-day-name { font-size: 0.6rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.weather-icon { font-size: 1.2rem; margin: 4px 0; }
+.weather-temps { font-size: 0.65rem; }
+.weather-high { color: var(--gold-light); font-weight: 700; }
+.weather-low { color: var(--muted); }
+.weather-loading { text-align: center; color: var(--muted); font-size: 0.7rem; padding: 12px; }
+
+/* Subscribe button */
+.subscribe-btn {
+    padding: 5px 12px; border-radius: 20px; white-space: nowrap;
+    border: 1px solid rgba(212,160,23,0.2); background: transparent;
+    color: var(--muted); font-size: 0.65rem; font-weight: 700;
+    cursor: pointer; transition: all 0.2s; margin-left: auto;
+}
+.subscribe-btn:hover { color: var(--gold); background: rgba(212,160,23,0.08); }
+
+/* ICS modal */
+.ics-feed-list { display: flex; flex-direction: column; gap: 10px; }
+.ics-feed-item {
+    background: rgba(0,0,0,0.3); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 12px;
+}
+.ics-feed-label { font-size: 0.75rem; font-weight: 700; color: var(--gold-light); margin-bottom: 4px; }
+.ics-feed-row { display: flex; align-items: center; gap: 6px; }
+.ics-feed-url {
+    flex: 1; font-size: 0.6rem; color: var(--muted);
+    background: rgba(0,0,0,0.3); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 8px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-family: monospace;
+}
+.ics-copy-btn {
+    padding: 5px 10px; border-radius: 8px; white-space: nowrap;
+    border: 1px solid rgba(212,160,23,0.25); background: rgba(212,160,23,0.08);
+    color: var(--gold); font-size: 0.6rem; font-weight: 700;
+    cursor: pointer; transition: all 0.2s; flex-shrink: 0;
+}
+.ics-copy-btn:hover { background: rgba(212,160,23,0.18); }
+.ics-copy-btn.copied { background: rgba(34,197,94,0.15); color: #22c55e; border-color: rgba(34,197,94,0.3); }
+.ics-instructions {
+    font-size: 0.7rem; color: var(--muted); line-height: 1.5;
+    margin-top: 14px; padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
 @media (max-width: 400px) {
     .cal-day { min-height: 48px; }
     .event-preview { display: none; }
+    .weather-day { min-width: 60px; padding: 6px 4px; }
 }
 </style>
 </head>
@@ -254,6 +314,10 @@ body {
         <button onclick="navMonth(0)" title="Today" style="font-size:0.7rem;">Today</button>
         <button onclick="navMonth(1)">&rarr;</button>
     </div>
+</div>
+
+<div class="weather-bar" id="weatherBar">
+    <div class="weather-loading">Loading weather...</div>
 </div>
 
 <div class="cal-filters" id="calFilters"></div>
@@ -319,6 +383,53 @@ body {
     </div>
 </div>
 
+<div class="modal-backdrop" id="icsModal">
+    <div class="modal">
+        <h2>Subscribe to Calendars</h2>
+        <div class="ics-feed-list">
+            <div class="ics-feed-item">
+                <div class="ics-feed-label">Family</div>
+                <div class="ics-feed-row">
+                    <div class="ics-feed-url">https://casa-calendar.onrender.com/api/calendar/family.ics</div>
+                    <button class="ics-copy-btn" onclick="copyIcsUrl(this, 'https://casa-calendar.onrender.com/api/calendar/family.ics')">Copy</button>
+                </div>
+            </div>
+            <div class="ics-feed-item">
+                <div class="ics-feed-label">Peter Work</div>
+                <div class="ics-feed-row">
+                    <div class="ics-feed-url">https://casa-calendar.onrender.com/api/calendar/peter_work.ics</div>
+                    <button class="ics-copy-btn" onclick="copyIcsUrl(this, 'https://casa-calendar.onrender.com/api/calendar/peter_work.ics')">Copy</button>
+                </div>
+            </div>
+            <div class="ics-feed-item">
+                <div class="ics-feed-label">Peter Personal</div>
+                <div class="ics-feed-row">
+                    <div class="ics-feed-url">https://casa-calendar.onrender.com/api/calendar/peter_personal.ics</div>
+                    <button class="ics-copy-btn" onclick="copyIcsUrl(this, 'https://casa-calendar.onrender.com/api/calendar/peter_personal.ics')">Copy</button>
+                </div>
+            </div>
+            <div class="ics-feed-item">
+                <div class="ics-feed-label">Gladys</div>
+                <div class="ics-feed-row">
+                    <div class="ics-feed-url">https://casa-calendar.onrender.com/api/calendar/gladys.ics</div>
+                    <button class="ics-copy-btn" onclick="copyIcsUrl(this, 'https://casa-calendar.onrender.com/api/calendar/gladys.ics')">Copy</button>
+                </div>
+            </div>
+            <div class="ics-feed-item">
+                <div class="ics-feed-label">All Calendars</div>
+                <div class="ics-feed-row">
+                    <div class="ics-feed-url">https://casa-calendar.onrender.com/api/calendar/all.ics</div>
+                    <button class="ics-copy-btn" onclick="copyIcsUrl(this, 'https://casa-calendar.onrender.com/api/calendar/all.ics')">Copy</button>
+                </div>
+            </div>
+        </div>
+        <div class="ics-instructions">
+            Paste any URL into Proton Calendar, Apple Calendar, or any app that supports ICS subscriptions. Events will sync automatically.
+        </div>
+        <button class="btn-cancel" onclick="closeIcsModal()" style="margin-top:14px;">Close</button>
+    </div>
+</div>
+
 <script>
 var currentYear = 2026, currentMonth = 2; // 0-indexed: 2 = March
 var events = [];
@@ -358,6 +469,7 @@ function renderCalFilters() {
                 '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + calColors[id] + ';margin-right:6px;vertical-align:middle;"></span>' +
                 calNames[id] + '</button>';
     });
+    html += '<button class="subscribe-btn" onclick="openIcsModal()">Subscribe</button>';
     document.getElementById('calFilters').innerHTML = html;
 }
 
@@ -554,10 +666,87 @@ function fetchEvents() {
     .catch(function(err) { console.error('Fetch events failed:', err); });
 }
 
+// Weather
+var weatherEmoji = {
+    'clear': '\u2600\uFE0F', 'sunny': '\u2600\uFE0F',
+    'partly_cloudy': '\u26C5', 'cloudy': '\u26C5', 'overcast': '\u26C5',
+    'fog': '\uD83C\uDF2B\uFE0F', 'mist': '\uD83C\uDF2B\uFE0F',
+    'rain': '\uD83C\uDF27\uFE0F', 'heavy_rain': '\uD83C\uDF27\uFE0F',
+    'drizzle': '\uD83C\uDF26\uFE0F', 'light_rain': '\uD83C\uDF26\uFE0F',
+    'snow': '\u2744\uFE0F', 'sleet': '\u2744\uFE0F',
+    'thunderstorm': '\u26C8\uFE0F', 'storm': '\u26C8\uFE0F'
+};
+
+function getWeatherEmoji(condition) {
+    if (!condition) return '\u26C5';
+    var c = condition.toLowerCase().replace(/\s+/g, '_');
+    for (var key in weatherEmoji) {
+        if (c.indexOf(key) !== -1) return weatherEmoji[key];
+    }
+    return '\u26C5';
+}
+
+function fetchWeather() {
+    fetch('/api/weather')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        var days = data.forecast || data.days || data;
+        if (!Array.isArray(days) || days.length === 0) {
+            document.getElementById('weatherBar').innerHTML = '<div class="weather-loading">Weather unavailable</div>';
+            return;
+        }
+        var dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        var html = '';
+        days.slice(0, 7).forEach(function(d) {
+            var dt = new Date(d.date);
+            var dayName = dayNames[dt.getUTCDay()] || '?';
+            var emoji = getWeatherEmoji(d.condition || d.conditions || d.weather || '');
+            var high = Math.round(d.high_f || d.high || d.temp_max || 0);
+            var low = Math.round(d.low_f || d.low || d.temp_min || 0);
+            html += '<div class="weather-day">';
+            html += '<div class="weather-day-name">' + dayName + '</div>';
+            html += '<div class="weather-icon">' + emoji + '</div>';
+            html += '<div class="weather-temps"><span class="weather-high">' + high + '\u00B0</span> <span class="weather-low">' + low + '\u00B0</span></div>';
+            html += '</div>';
+        });
+        document.getElementById('weatherBar').innerHTML = html;
+    })
+    .catch(function(err) {
+        console.error('Weather fetch failed:', err);
+        document.getElementById('weatherBar').innerHTML = '<div class="weather-loading">Weather unavailable</div>';
+    });
+}
+
+// ICS subscribe
+function openIcsModal() {
+    document.getElementById('icsModal').classList.add('visible');
+}
+function closeIcsModal() {
+    document.getElementById('icsModal').classList.remove('visible');
+}
+function copyIcsUrl(btn, url) {
+    navigator.clipboard.writeText(url).then(function() {
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(function() { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+    }).catch(function() {
+        // Fallback
+        var ta = document.createElement('textarea');
+        ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(function() { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+    });
+}
+
 // Init
 renderCalFilters();
 renderCalendar();
 fetchEvents();
+fetchWeather();
 
 // Service worker
 if ('serviceWorker' in navigator) {

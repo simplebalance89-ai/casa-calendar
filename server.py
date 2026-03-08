@@ -11,11 +11,14 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Optional
 
+import httpx
 from dateutil import parser as dtparser
 from dateutil.rrule import DAILY, MONTHLY, WEEKLY, rrule
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from icalendar import Calendar as ICalendar
+from icalendar import Event as IEvent
 from pydantic import BaseModel
 
 # --- Config ---
@@ -305,6 +308,133 @@ def import_ics(request_body: dict):
     conn.commit()
     conn.close()
     return {"imported": imported, "calendar": target_calendar}
+
+
+# --- ICS Subscription Feeds ---
+VALID_CALENDARS = {"family", "peter_work", "peter_personal", "gladys"}
+CALENDAR_NAMES = {
+    "family": "Casa Gianelli — Family",
+    "peter_work": "Casa Gianelli — Peter Work",
+    "peter_personal": "Casa Gianelli — Peter Personal",
+    "gladys": "Casa Gianelli — Gladys",
+}
+
+
+def _build_ics_feed(calendar_ids: list[str], cal_name: str) -> bytes:
+    """Build an ICS file from events in the specified calendars."""
+    cal = ICalendar()
+    cal.add("prodid", "-//Casa Gianelli//Casa Calendar//EN")
+    cal.add("version", "2.0")
+    cal.add("calscale", "GREGORIAN")
+    cal.add("x-wr-calname", cal_name)
+
+    now = datetime.utcnow()
+    range_start = (now - timedelta(days=30)).isoformat() + "Z"
+    range_end = (now + timedelta(days=90)).isoformat() + "Z"
+
+    conn = get_db()
+    for cal_id in calendar_ids:
+        rows = conn.execute(
+            "SELECT * FROM events WHERE calendar = ? AND end >= ? AND start <= ? ORDER BY start ASC",
+            (cal_id, range_start, range_end),
+        ).fetchall()
+
+        for row in rows:
+            ev = dict(row)
+            if ev["recurring"] != "none":
+                instances = _expand_recurring(ev, range_start, range_end)
+            else:
+                instances = [ev]
+
+            for idx, inst in enumerate(instances):
+                vevent = IEvent()
+                uid = f"{inst['id']}-{idx}@casa-calendar" if inst.get("_recurring_instance") else f"{inst['id']}@casa-calendar"
+                vevent.add("uid", uid)
+                vevent.add("summary", inst["title"])
+
+                dt_start = dtparser.parse(inst["start"])
+                dt_end = dtparser.parse(inst["end"])
+                vevent.add("dtstart", dt_start)
+                vevent.add("dtend", dt_end)
+
+                if inst.get("description"):
+                    vevent.add("description", inst["description"])
+                if inst.get("location"):
+                    vevent.add("location", inst["location"])
+
+                vevent.add("dtstamp", now)
+                cal.add_component(vevent)
+
+    conn.close()
+    return cal.to_ical()
+
+
+@app.get("/api/calendar/all.ics")
+def ics_feed_all():
+    """Combined ICS feed of ALL calendars."""
+    data = _build_ics_feed(list(VALID_CALENDARS), "Casa Gianelli — All Calendars")
+    return Response(content=data, media_type="text/calendar",
+                    headers={"Content-Disposition": "inline; filename=all.ics"})
+
+
+@app.get("/api/calendar/{calendar_id}.ics")
+def ics_feed(calendar_id: str):
+    """ICS subscription feed for a single calendar."""
+    if calendar_id not in VALID_CALENDARS:
+        raise HTTPException(404, f"Calendar '{calendar_id}' not found. Valid: {', '.join(sorted(VALID_CALENDARS))}")
+    name = CALENDAR_NAMES.get(calendar_id, calendar_id)
+    data = _build_ics_feed([calendar_id], name)
+    return Response(content=data, media_type="text/calendar",
+                    headers={"Content-Disposition": f"inline; filename={calendar_id}.ics"})
+
+
+# --- Weather API ---
+WMO_WEATHER_CODES = {
+    0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+    45: "Foggy", 48: "Depositing rime fog",
+    51: "Light drizzle", 53: "Moderate drizzle", 55: "Dense drizzle",
+    56: "Light freezing drizzle", 57: "Dense freezing drizzle",
+    61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain",
+    66: "Light freezing rain", 67: "Heavy freezing rain",
+    71: "Slight snow", 73: "Moderate snow", 75: "Heavy snow",
+    77: "Snow grains",
+    80: "Slight showers", 81: "Moderate showers", 82: "Violent showers",
+    85: "Slight snow showers", 86: "Heavy snow showers",
+    95: "Thunderstorm", 96: "Thunderstorm with slight hail",
+    99: "Thunderstorm with heavy hail",
+}
+
+
+@app.get("/api/weather")
+async def weather():
+    """7-day weather forecast for Los Angeles."""
+    url = (
+        "https://api.open-meteo.com/v1/forecast"
+        "?latitude=34.0522&longitude=-118.2437"
+        "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode"
+        "&timezone=America/Los_Angeles&forecast_days=7"
+    )
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(url)
+    if resp.status_code != 200:
+        raise HTTPException(502, "Weather API unavailable")
+
+    data = resp.json()
+    daily = data.get("daily", {})
+    forecast = []
+    for i, date in enumerate(daily.get("time", [])):
+        code = daily["weathercode"][i]
+        forecast.append({
+            "date": date,
+            "high_f": round(daily["temperature_2m_max"][i] * 9 / 5 + 32, 1),
+            "low_f": round(daily["temperature_2m_min"][i] * 9 / 5 + 32, 1),
+            "high_c": daily["temperature_2m_max"][i],
+            "low_c": daily["temperature_2m_min"][i],
+            "precip_chance": daily["precipitation_probability_max"][i],
+            "condition": WMO_WEATHER_CODES.get(code, f"Unknown ({code})"),
+            "weather_code": code,
+        })
+    return {"location": "Los Angeles, CA", "forecast": forecast}
 
 
 # --- Recurring event expansion ---
