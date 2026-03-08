@@ -78,9 +78,68 @@ def init_db():
 
 
 # --- App ---
+ICS_SYNC_FEEDS = [
+    {"url": "https://outlook.live.com/owa/calendar/82a843cb-2519-46fd-923d-225363d88c97/4bb64e14-649f-4bbc-a562-322a20bef7ca/cid-9AF53EE68AF46862/calendar.ics", "calendar": "peter_personal"},
+    {"url": "https://outlook.office365.com/owa/calendar/5a870aae17844a68b44ab67aabbad26a@conveyance365.com/34f27793afff4d24b607843f56a2cff814936383002766015513/calendar.ics", "calendar": "peter_work"},
+]
+
+
+async def _ics_sync_loop():
+    """Background loop: re-import ICS feeds every 30 minutes."""
+    import asyncio
+    await asyncio.sleep(10)  # let server start
+    while True:
+        for feed in ICS_SYNC_FEEDS:
+            try:
+                with httpx.Client(timeout=30, follow_redirects=True) as client:
+                    resp = client.get(feed["url"])
+                if resp.status_code != 200:
+                    print(f"[ICS_SYNC] Failed {feed['calendar']}: HTTP {resp.status_code}")
+                    continue
+                from icalendar import Calendar as _Cal
+                cal = _Cal.from_ical(resp.text)
+                conn = get_db()
+                # Clear old imported events for this calendar, then re-import fresh
+                conn.execute("DELETE FROM events WHERE calendar = ? AND created_by = 'ics_import'", (feed["calendar"],))
+                imported = 0
+                now = datetime.utcnow().isoformat() + "Z"
+                for component in cal.walk():
+                    if component.name != "VEVENT":
+                        continue
+                    title = str(component.get("SUMMARY", "Untitled"))
+                    dtstart = component.get("DTSTART")
+                    dtend = component.get("DTEND")
+                    location = str(component.get("LOCATION", ""))
+                    description = str(component.get("DESCRIPTION", ""))
+                    if not dtstart:
+                        continue
+                    start_dt = dtstart.dt
+                    end_dt = dtend.dt if dtend else start_dt
+                    start_str = start_dt.isoformat() if hasattr(start_dt, "isoformat") else str(start_dt)
+                    end_str = end_dt.isoformat() if hasattr(end_dt, "isoformat") else str(end_dt)
+                    event_id = str(uuid.uuid4())[:8]
+                    conn.execute(
+                        """INSERT INTO events (id, title, start, end, location, description,
+                           calendar, recurring, reminder_minutes, created_by, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (event_id, title, start_str, end_str, location,
+                         description[:500] if description else "", feed["calendar"], "none", 15,
+                         "ics_import", now, now),
+                    )
+                    imported += 1
+                conn.commit()
+                conn.close()
+                print(f"[ICS_SYNC] {feed['calendar']}: {imported} events imported")
+            except Exception as e:
+                print(f"[ICS_SYNC] Error syncing {feed['calendar']}: {e}")
+        await asyncio.sleep(1800)  # 30 minutes
+
+
 @asynccontextmanager
 async def lifespan(app):
+    import asyncio
     init_db()
+    asyncio.create_task(_ics_sync_loop())
     yield
 
 
@@ -253,7 +312,6 @@ def delete_event(event_id: str):
 @app.post("/api/import/ics")
 def import_ics(request_body: dict):
     """Import events from an ICS URL."""
-    import requests
     from icalendar import Calendar
 
     url = request_body.get("url")
@@ -261,7 +319,8 @@ def import_ics(request_body: dict):
     if not url:
         raise HTTPException(400, "Missing 'url' field")
 
-    resp = requests.get(url, timeout=30)
+    with httpx.Client(timeout=30, follow_redirects=True) as client:
+        resp = client.get(url)
     if resp.status_code != 200:
         raise HTTPException(502, f"Failed to fetch ICS: HTTP {resp.status_code}")
 
